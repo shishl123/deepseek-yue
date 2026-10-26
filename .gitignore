@@ -1,0 +1,15 @@
+# 运行时生成
+logs/
+config.json
+
+# 构建中间产物
+bin/
+obj/
+*.pdb
+*.user
+*.suo
+
+# 系统文件
+Thumbs.db
+desktop.ini
+.DS_Store

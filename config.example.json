@@ -1,0 +1,16 @@
+{
+  "apiUrl": "http://your-host/status",
+  "token": "YOUR_TOKEN",
+  "pollSeconds": 30,
+  "zoom": 1.2,
+  "topMost": true,
+  "showHud": true,
+  "sound": true,
+  "clickBanter": true,
+  "lowBalanceWarn": 20000,
+  "expiryWarnDays": 7,
+  "x": -2147483648,
+  "y": -2147483648,
+  "timeoutSeconds": 10,
+  "theme": "soft"
+}
