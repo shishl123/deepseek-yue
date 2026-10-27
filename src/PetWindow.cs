@@ -121,6 +121,8 @@ namespace DshPet
         double _target = -1;
         DateTime _flashAt = DateTime.MinValue;
         Bitmap _whaleIcon;
+        Bitmap _hudCache;
+        string _hudSig = "";
 
         static readonly FontStyle FS_R = FontStyle.Regular;
         static readonly FontStyle FS_B = FontStyle.Bold;
@@ -155,7 +157,25 @@ namespace DshPet
         int _startIdx;
         DateTime _startFrameAt;
         int _frame;
-        DateTime _shakeAt = DateTime.MinValue;
+        double _shakeTime = -99;
+        readonly Stopwatch _watch = Stopwatch.StartNew();
+        double _clock;
+        double _dragVX;
+        double _tilt, _tiltV;
+        double _inertiaVX;
+        bool _hoverOn;
+        double _hoverScale = 1.0;
+        DateTime _holdAt = DateTime.MinValue;
+        bool _holdDone;
+        int _clickCount;
+        double _clickTime = -99;
+        DateTime _headAt = DateTime.MinValue;
+        bool _headDone;
+        DateTime _nextChatAt = DateTime.MinValue;
+        long _milestone;
+        string _prevState = "";
+        double _fadeStart = -99;
+        DateTime _lastActAt = DateTime.Now;
         DateTime _nextPollDue = DateTime.MinValue;
         volatile bool _busy;
         bool _closing;
@@ -401,7 +421,7 @@ namespace DshPet
         void BuildFonts()
         {
             DisposeFonts();
-            float d = (float)_dpi;
+            float d = (float)(_dpi * _cfg.Zoom);
             _fLabel = new Font(_fontName, 7.5f * d, FS_R, GraphicsUnit.Point);
             _fValue = new Font(_fontName, 13f * d, FS_B, GraphicsUnit.Point);
             _fLine = new Font(_fontName, 8f * d, FS_R, GraphicsUnit.Point);
@@ -558,6 +578,7 @@ namespace DshPet
             if (z > 2.0) z = 2.0;
             _cfg.Zoom = z;
             _cfg.Save();
+            BuildFonts();
             ApplyLayout(true);
             Render();
         }
@@ -571,10 +592,11 @@ namespace DshPet
             foreach (Bitmap b in _startScaled) b.Dispose();
             _startScaled.Clear();
 
+            float u = (float)(_dpi * _cfg.Zoom);
             _petW = (int)Math.Round(_baseW * _cfg.Zoom);
             _petH = (int)Math.Round(_baseH * _cfg.Zoom);
-            _hudH = _cfg.ShowHud ? (int)Math.Round(88 * _dpi) : 0;
-            _w = Math.Max(_petW + (int)Math.Round(6 * _dpi), (int)Math.Round(286 * _dpi));
+            _hudH = _cfg.ShowHud ? (int)Math.Round(88 * u) : 0;
+            _w = Math.Max(_petW + (int)Math.Round(6 * u), (int)Math.Round(286 * u));
             _h = _petH + _hudH;
 
             if (_surface == null) _surface = new LayeredSurface();
@@ -598,8 +620,8 @@ namespace DshPet
                                   PixelFormat.Format32bppPArgb);
             using (Graphics g = Graphics.FromImage(b))
             {
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.InterpolationMode = InterpolationMode.Bilinear;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.DrawImage(src, new Rectangle(0, 0, b.Width, b.Height));
             }
@@ -631,17 +653,48 @@ namespace DshPet
 
         void SetState(string key, double seconds)
         {
+            if (_state != key)
+            {
+                _prevState = _state;
+                _fadeStart = Now;
+            }
             _state = key;
             _stateUntil = seconds > 0 ? DateTime.Now.AddSeconds(seconds) : DateTime.MinValue;
+        }
+
+        double Now { get { return _watch.Elapsed.TotalSeconds; } }
+
+        void Shake()
+        {
+            _shakeTime = Now;
+            _lastActAt = DateTime.Now;
+        }
+
+        bool IsSolid(int x, int y)
+        {
+            if (_hit == null || _hitW <= 0) return false;
+            int gx = x / HitStep;
+            int gy = y / HitStep;
+            if (gx < 0 || gy < 0 || gx >= _hitW || gy >= _hitH) return false;
+            return _hit[gy * _hitW + gx];
         }
 
         void OnTick(object sender, EventArgs e)
         {
             if (_closing) return;
+            double now = Now;
+            double dt = now - _clock;
+            if (dt <= 0) dt = 0.025;
+            if (dt > 0.25) dt = 0.25;
+            _clock = now;
             _frame++;
 
-            HandleDrag();
+            HandleDrag(now);
             StepNumbers();
+            UpdateTilt(dt);
+            UpdateHover(dt);
+            UpdateHeadPat(now);
+            UpdateChat(now);
 
             if (_state == "start")
             {
@@ -673,43 +726,166 @@ namespace DshPet
 
             if (DateTime.Now >= _nextPollDue) StartPoll();
 
-            if (_cfg.TopMost && (_frame % 60) == 0 && IsHandleCreated)
+            if (_cfg.TopMost && (_frame % 45) == 0 && IsHandleCreated)
             {
                 try { Native.SetWindowPos(Handle, new IntPtr(-1), 0, 0, 0, 0, Native.SWP_NOMOVE | Native.SWP_NOSIZE | Native.SWP_NOACTIVATE); }
                 catch { }
             }
 
             Render();
+
+            bool busy = _dragging || _floaters.Count > 0 || (DateTime.Now < _balloonUntil && _balloon.Length > 0)
+                        || Math.Abs(_tilt) > 0.35 || Math.Abs(_inertiaVX) > 0.4
+                        || _hoverOn || (now - _fadeStart) < 0.3;
+            int interval = 25;
+            if (!busy && (DateTime.Now - _lastActAt).TotalSeconds > 4) interval = 200;
+            if (_anim.Interval != interval) _anim.Interval = interval;
         }
 
-        void HandleDrag()
+        void UpdateTilt(double dt)
         {
-            if (!_dragging) return;
-            bool down = (Native.GetAsyncKeyState(Native.VK_LBUTTON) & 0x8000) != 0;
-            if (down)
+            double target = 0;
+            if (_dragging) target = Math.Max(-10, Math.Min(10, _dragVX * 1.7));
+            double acc = (target - _tilt) * 30 - _tiltV * 10;
+            _tiltV += acc * dt;
+            _tilt += _tiltV * dt;
+            if (Math.Abs(_tilt) < 0.02 && Math.Abs(_tiltV) < 0.02) { _tilt = 0; _tiltV = 0; }
+        }
+
+        void UpdateHover(double dt)
+        {
+            Point mp = PointToClient(Cursor.Position);
+            bool inside = mp.X >= 0 && mp.Y >= 0 && mp.X < _w && mp.Y < _petH;
+            bool solid = inside && IsSolid(mp.X, mp.Y);
+            if (solid != _hoverOn)
             {
-                Point p = Cursor.Position;
-                int dx = p.X - _dragStart.X;
-                int dy = p.Y - _dragStart.Y;
-                if (Math.Abs(dx) + Math.Abs(dy) > 3) _dragMoved = true;
-                Location = new Point(_dragOrigin.X + dx, _dragOrigin.Y + dy);
+                _hoverOn = solid;
+                _lastActAt = DateTime.Now;
+            }
+            double target = _hoverOn ? 1.035 : 1.0;
+            _hoverScale += (target - _hoverScale) * Math.Min(1.0, dt * 12);
+        }
+
+        void UpdateHeadPat(double now)
+        {
+            if (!_cfg.ClickBanter) return;
+            Point mp = PointToClient(Cursor.Position);
+            bool onHead = mp.X >= 0 && mp.Y >= 0 && mp.X < _w && mp.Y < _petH * 0.34 && IsSolid(mp.X, mp.Y);
+            if (onHead && !_dragging)
+            {
+                if (_headAt == DateTime.MinValue) _headAt = DateTime.Now;
+                else if (!_headDone && (DateTime.Now - _headAt).TotalSeconds > 0.7)
+                {
+                    _headDone = true;
+                    Dbg.W("headpat fired");
+                    SetState("approval", 1.9);
+                    ShowBalloon("唔…摸头好舒服，再摸一下~", CGreen, 2.8);
+                    PlaySfx("click");
+                    _lastActAt = DateTime.Now;
+                }
             }
             else
             {
-                _dragging = false;
-                if (_dragMoved)
+                _headAt = DateTime.MinValue;
+                _headDone = false;
+            }
+        }
+
+        void UpdateChat(double now)
+        {
+            if (_nextChatAt == DateTime.MinValue) { _nextChatAt = DateTime.Now.AddMinutes(38 + _rnd.Next(0, 20)); return; }
+            if (DateTime.Now < _nextChatAt) return;
+            _nextChatAt = DateTime.Now.AddMinutes(38 + _rnd.Next(0, 30));
+            if (_snap == null || !_snap.Ok) return;
+            string[] lines = new string[]
+            {
+                "哥哥，现在还剩 " + Num(_snap.CreditsSum) + " 点，我盯着呢",
+                "已经陪了你一会儿了，喝口水吧？",
+                "别老盯着屏幕，偶尔看看我嘛",
+                "余额我记着呢，你安心干活就好",
+                "刚才又少了一点点，我不说你，我心疼"
+            };
+            ShowBalloon(lines[_rnd.Next(lines.Length)], CGreen, 6);
+            SetState("sing", 1.8);
+            _lastActAt = DateTime.Now;
+        }
+
+        void SnapToEdge()
+        {
+            Rectangle wa = Screen.FromPoint(Cursor.Position).WorkingArea;
+            int sn = (int)Math.Round(16 * _dpi);
+            if (Math.Abs(Left - wa.Left) < sn) Left = wa.Left;
+            else if (Math.Abs(wa.Right - (Left + Width)) < sn) Left = wa.Right - Width;
+            if (Math.Abs(Top - wa.Top) < sn) Top = wa.Top;
+            else if (Math.Abs(wa.Bottom - (Top + Height)) < sn) Top = wa.Bottom - Height;
+        }
+
+        void HandleDrag(double now)
+        {
+            if (_dragging)
+            {
+                bool down = (Native.GetAsyncKeyState(Native.VK_LBUTTON) & 0x8000) != 0;
+                if (down)
                 {
+                    Point p = Cursor.Position;
+                    int nx = _dragOrigin.X + (p.X - _dragStart.X);
+                    int ny = _dragOrigin.Y + (p.Y - _dragStart.Y);
+                    int stepX = nx - Left;
+                    _dragVX = _dragVX * 0.55 + stepX * 0.45;
+                    if (Math.Abs(p.X - _dragStart.X) + Math.Abs(p.Y - _dragStart.Y) > 3) _dragMoved = true;
+                    Location = new Point(nx, ny);
+                    _lastActAt = DateTime.Now;
+
+                    if (!_dragMoved && !_holdDone)
+                    {
+                        if (_holdAt == DateTime.MinValue) _holdAt = DateTime.Now;
+                        else if ((DateTime.Now - _holdAt).TotalSeconds > 0.8)
+                        {
+                            _holdDone = true;
+                            SetState("error", 1.8);
+                            Shake();
+                            ShowBalloon("唔…别捏我脸，会变形的啦", CYellow, 3.2);
+                            PlaySfx("consume");
+                        }
+                    }
+                }
+                else
+                {
+                    _dragging = false;
+                    _holdAt = DateTime.MinValue;
+                    bool wasHold = _holdDone;
+                    _holdDone = false;
+                    if (_dragMoved)
+                    {
+                        SnapToEdge();
+                        _inertiaVX = Math.Max(-26, Math.Min(26, _dragVX * 0.95));
+                        _cfg.X = Left;
+                        _cfg.Y = Top;
+                        _cfg.Save();
+                    }
+                    else if (!wasHold)
+                    {
+                        OnPetClicked();
+                    }
+                }
+            }
+            else if (Math.Abs(_inertiaVX) > 0.4)
+            {
+                Rectangle wa = Screen.FromPoint(Cursor.Position).WorkingArea;
+                int nx = Left + (int)Math.Round(_inertiaVX);
+                if (nx < wa.Left) { nx = wa.Left; _inertiaVX = -_inertiaVX * 0.45; }
+                if (nx + Width > wa.Right) { nx = wa.Right - Width; _inertiaVX = -_inertiaVX * 0.45; }
+                Location = new Point(nx, Top);
+                _inertiaVX *= 0.90;
+                if (Math.Abs(_inertiaVX) <= 0.4)
+                {
+                    _inertiaVX = 0;
                     _cfg.X = Left;
                     _cfg.Y = Top;
                     _cfg.Save();
                 }
-                else
-                {
-                    OnPetClicked();
-                }
             }
         }
-
         protected override void WndProc(ref Message m)
         {
             if (m.Msg == Native.WM_NCHITTEST && _hit != null && _hitW > 0)
@@ -775,6 +951,8 @@ namespace DshPet
                 }
                 _dragging = true;
                 _dragMoved = false;
+                _holdAt = DateTime.MinValue;
+                _holdDone = false;
                 _dragStart = Cursor.Position;
                 _dragOrigin = Location;
             }
@@ -783,13 +961,13 @@ namespace DshPet
         void OnPetClicked()
         {
             if (!_cfg.ClickBanter) return;
+            _lastActAt = DateTime.Now;
             SetState(_rnd.Next(2) == 0 ? "approval" : "sing", 1.6);
             string line = _clickLines[_rnd.Next(_clickLines.Length)];
             if (line.IndexOf("{0}") >= 0) line = string.Format(line, _snap != null ? Num(_snap.CreditsSum) : "--");
             ShowBalloon(line, CText, 3.5);
             PlaySfx("click");
         }
-
         // ================= 网络 =================
 
         void StartPoll()
@@ -923,15 +1101,20 @@ namespace DshPet
         {
             _lastDelta = delta;
             AddFloater("-" + Num(delta), CRed);
-            _shakeAt = now;
-            _flashAt = now;
+            Shake();
             SetState("done", 2.4);
             string line = _consumeLines[_rnd.Next(_consumeLines.Length)];
             ShowBalloon(string.Format(line, Num(delta)), CRed, 5);
             PlaySfx("consume");
+
+            long m = _runConsumed / 1000;
+            if (m > _milestone)
+            {
+                _milestone = m;
+                ShowBalloon("已经烧掉 " + Num(_runConsumed) + " 点了…哥哥，我有点心疼", CYellow, 6);
+            }
             UpdateHudText();
         }
-
         void RunDemo()
         {
             long delta = 1234;
@@ -1086,11 +1269,11 @@ namespace DshPet
                 g.Clear(Color.Transparent);
                 g.SmoothingMode = SmoothingMode.AntiAlias;
                 g.TextRenderingHint = TextRenderingHint.AntiAlias;
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.InterpolationMode = InterpolationMode.Bilinear;
+                g.PixelOffsetMode = PixelOffsetMode.Half;
 
                 DrawPet(g);
-                if (_cfg.ShowHud) DrawHud(g);
+                if (_cfg.ShowHud) DrawHudCached(g);
                 DrawFloaters(g);
                 DrawBalloon(g);
             }
@@ -1101,55 +1284,93 @@ namespace DshPet
                 if (_snap != null && !_snap.Ok) alpha = 210;
                 _surface.Present(Handle, alpha);
                 if (_frame < 4) Dbg.W(string.Format("Render frame={0} surf={1}x{2} win={3} ok={4} err={5} a_center={6} a_hud={7}", _frame, _surface.Width, _surface.Height, Size, _surface.LastOk, _surface.LastError, _surface.AlphaAt(_w / 2, _petH / 2), _surface.AlphaAt(_w / 2, _petH + 40)));
-                if ((_frame % 6) == 0) RebuildHitMask();
+                if ((_frame % 24) == 0) RebuildHitMask();
             }
             catch { }
         }
 
-        void DrawPet(Graphics g)
+        Bitmap SpriteFor(string key)
         {
-            Bitmap bmp;
-            if (_state == "start" && _startRaw.Count > 0)
+            if (key == "start" && _startRaw.Count > 0)
             {
                 List<Bitmap> frames = StartFrames();
-                int idx = Math.Min(_startIdx, frames.Count - 1);
-                bmp = frames[idx];
+                return frames[Math.Min(_startIdx, frames.Count - 1)];
+            }
+            return GetScaled(key);
+        }
+
+        void DrawSprite(Graphics g, Bitmap bmp, double alpha, float bob)
+        {
+            int x = (_w - bmp.Width) / 2;
+            int y = (int)Math.Round(bob) + (_petH - bmp.Height);
+            if (alpha >= 0.995) { g.DrawImage(bmp, x, y); return; }
+            if (alpha <= 0.01) return;
+            using (ImageAttributes ia = new ImageAttributes())
+            {
+                ColorMatrix cm = new ColorMatrix();
+                cm.Matrix33 = (float)alpha;
+                ia.SetColorMatrix(cm);
+                g.DrawImage(bmp, new Rectangle(x, y, bmp.Width, bmp.Height), 0, 0, bmp.Width, bmp.Height, GraphicsUnit.Pixel, ia);
+            }
+        }
+
+        void DrawPet(Graphics g)
+        {
+            double now = Now;
+            Bitmap cur = SpriteFor(_state);
+            if (cur == null) return;
+
+            float breathe = (float)Math.Sin(now * 2.0);
+            float bob = breathe * 2.2f * (float)_cfg.Zoom;
+
+            float shake = 0f;
+            double st = now - _shakeTime;
+            if (st >= 0 && st < 0.55)
+            {
+                double k = 1.0 - st / 0.55;
+                shake = (float)(Math.Sin(st * 42) * 5 * _cfg.Zoom * k);
+            }
+
+            float swayX = (float)(Math.Sin(now * 0.55) * 1.5 * (float)_cfg.Zoom);
+            float tilt = (float)_tilt;
+            float sc = (float)_hoverScale;
+            float scY = sc * (1f + 0.010f * breathe);
+            double fade = Math.Min(1.0, (now - _fadeStart) / 0.16);
+            bool animated = Math.Abs(tilt) > 0.05 || Math.Abs(sc - 1f) > 0.002f || fade < 0.999;
+
+            if (_cfg.Zoom >= 0.6)
+            {
+                int ew = (int)(cur.Width * 0.5);
+                int eh = Math.Max(4, (int)(9 * _cfg.Zoom));
+                Rectangle er = new Rectangle((_w - ew) / 2, _petH - eh, ew, eh);
+                using (SolidBrush sb = new SolidBrush(Color.FromArgb(34, 50, 66, 120)))
+                    g.FillEllipse(sb, er);
+            }
+
+            if (animated)
+            {
+                GraphicsState gs = g.Save();
+                g.TranslateTransform(_w / 2f + shake + swayX, _petH / 2f);
+                g.RotateTransform(tilt);
+                g.ScaleTransform(sc, scY);
+                g.TranslateTransform(-_w / 2f, -_petH / 2f);
+
+                if (fade < 1 && _prevState.Length > 0)
+                {
+                    Bitmap prev = SpriteFor(_prevState);
+                    if (prev != null) DrawSprite(g, prev, 1 - fade, bob);
+                }
+                DrawSprite(g, cur, fade, bob);
+
+                g.Restore(gs);
             }
             else
             {
-                bmp = GetScaled(_state);
+                int xoff = (int)Math.Round(swayX + shake);
+                int yoff = (int)Math.Round(bob);
+                g.DrawImage(cur, (_w - cur.Width) / 2 + xoff, (_petH - cur.Height) + yoff);
             }
-            if (bmp == null) return;
-
-            float bob = (float)(Math.Sin(_frame * 0.08) * 1.6 * _cfg.Zoom);
-            int shake = 0;
-            double st = (DateTime.Now - _shakeAt).TotalMilliseconds;
-            if (st >= 0 && st < 520) shake = (int)Math.Round(Math.Sin(st / 26.0) * 5 * _cfg.Zoom);
-
-            int x = (_w - bmp.Width) / 2 + shake;
-            int y = (int)Math.Round(bob) + (_petH - bmp.Height);
-
-            // 阴影
-            if (_cfg.Zoom >= 0.8)
-            {
-                using (GraphicsPath sh = new GraphicsPath())
-                {
-                    int ew = (int)(bmp.Width * 0.52);
-                    int eh = (int)(10 * _cfg.Zoom);
-                    Rectangle er = new Rectangle((_w - ew) / 2, _petH - eh, ew, eh);
-                    sh.AddEllipse(er);
-                    using (PathGradientBrush pb = new PathGradientBrush(sh))
-                    {
-                        pb.CenterColor = Color.FromArgb(44, 50, 66, 120);
-                        pb.SurroundColors = new Color[] { Color.FromArgb(0, 10, 14, 30) };
-                        g.FillPath(pb, sh);
-                    }
-                }
-            }
-
-            g.DrawImage(bmp, x, y);
         }
-
         void DrawLabel(Graphics g, string text, Font f, SolidBrush b, float x, float y, Skin s)
         {
             DrawLabel(g, text, f, b, x, y, s, SFLeft);
@@ -1242,10 +1463,44 @@ namespace DshPet
             return c;
         }
 
+        string BuildHudSig()
+        {
+            double fl = (DateTime.Now - _flashAt).TotalMilliseconds;
+            bool flashing = fl >= 0 && fl < 760;
+            return _cfg.Theme + "|" + _w + "x" + _h + "|" + _shown.ToString("0") + "|" + _v1
+                 + "|" + _l2 + "|" + _l3 + "|" + _r1 + "|" + _r3 + "|" + _low.ToString()
+                 + "|" + ElapsedText() + "|" + (flashing ? ((int)fl).ToString() : "-")
+                 + "|" + (_snap == null ? "n" : (_snap.Ok ? "o" : "e"));
+        }
+
+        void DrawHudCached(Graphics g)
+        {
+            if (_hudCache == null || _hudCache.Width != _w || _hudCache.Height != _h)
+            {
+                if (_hudCache != null) _hudCache.Dispose();
+                _hudCache = new Bitmap(_w, _h, PixelFormat.Format32bppPArgb);
+                _hudSig = "";
+            }
+            string sig = BuildHudSig();
+            if (sig != _hudSig)
+            {
+                _hudSig = sig;
+                using (Graphics hg = Graphics.FromImage(_hudCache))
+                {
+                    hg.Clear(Color.Transparent);
+                    hg.SmoothingMode = SmoothingMode.AntiAlias;
+                    hg.TextRenderingHint = TextRenderingHint.AntiAlias;
+                    hg.InterpolationMode = InterpolationMode.Bilinear;
+                    hg.PixelOffsetMode = PixelOffsetMode.Half;
+                    DrawHud(hg);
+                }
+            }
+            g.DrawImage(_hudCache, 0, 0);
+        }
         void DrawHud(Graphics g)
         {
             Skin s = _skin;
-            float d = (float)_dpi;
+            float d = (float)(_dpi * _cfg.Zoom);
             int pad = (int)Math.Round(4 * d);
             Rectangle rc = new Rectangle(pad, _petH + (int)Math.Round(10 * d), _w - pad * 2, _hudH - (int)Math.Round(16 * d));
             if (rc.Height < 20) return;
@@ -1328,7 +1583,7 @@ namespace DshPet
         void DrawFloaters(Graphics g)
         {
             DateTime now = DateTime.Now;
-            float d = (float)_dpi;
+            float d = (float)(_dpi * _cfg.Zoom);
             for (int i = _floaters.Count - 1; i >= 0; i--)
             {
                 Floater f = _floaters[i];
@@ -1368,7 +1623,7 @@ namespace DshPet
         void DrawBalloon(Graphics g)
         {
             if (DateTime.Now > _balloonUntil || _balloon.Length == 0) return;
-            float d = (float)_dpi;
+            float d = (float)(_dpi * _cfg.Zoom);
 
             string text = _balloon;
             if (text.Length > 80) text = text.Substring(0, 80) + "…";
@@ -1462,6 +1717,7 @@ namespace DshPet
                 try { if (_tray != null) { _tray.Visible = false; _tray.Dispose(); } } catch { }
                 try { if (_menu != null) _menu.Dispose(); } catch { }
                 try { if (_surface != null) _surface.Dispose(); } catch { }
+                try { if (_hudCache != null) _hudCache.Dispose(); } catch { }
                 try { if (_client != null) _client.Dispose(); } catch { }
                 DisposeFonts();
                 foreach (Bitmap b in _sprites.Values) { try { b.Dispose(); } catch { } }

@@ -60,11 +60,18 @@ namespace DshPet
                 ImageLockMode.ReadOnly, PixelFormat.Format32bppPArgb);
             try
             {
-                for (int y = 0; y < _bmp.Height; y++)
+                if (data.Stride == _stride)
                 {
-                    IntPtr srcRow = new IntPtr(data.Scan0.ToInt64() + (long)y * data.Stride);
-                    IntPtr dstRow = new IntPtr(_bits.ToInt64() + (long)y * _stride);
-                    CopyMemory(dstRow, srcRow, (UIntPtr)(uint)_stride);
+                    CopyMemory(_bits, data.Scan0, (UIntPtr)(uint)(_stride * _bmp.Height));
+                }
+                else
+                {
+                    for (int y = 0; y < _bmp.Height; y++)
+                    {
+                        IntPtr srcRow = new IntPtr(data.Scan0.ToInt64() + (long)y * data.Stride);
+                        IntPtr dstRow = new IntPtr(_bits.ToInt64() + (long)y * _stride);
+                        CopyMemory(dstRow, srcRow, (UIntPtr)(uint)_stride);
+                    }
                 }
             }
             finally
