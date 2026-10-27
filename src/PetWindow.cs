@@ -852,7 +852,8 @@ namespace DshPet
 
             if (first)
             {
-                ShowBalloon("哥哥，我上岗啦，余额 40 个号已盯住~", CGreen, 4);
+                string cnt = sn.Accounts.Count.ToString();
+                ShowBalloon("哥哥，我上岗啦，" + cnt + " 个号已盯住~", CGreen, 4);
                 SetState("idle", 0);
                 PlaySfx("hello");
                 Log(now, sn, 0, "start");
@@ -876,6 +877,11 @@ namespace DshPet
             {
                 SetState("idle", 0);
                 Log(now, sn, 0, "ok");
+            }
+
+            if (first && sn.Total > 0 && sn.Accounts.Count != sn.Total)
+            {
+                ShowBalloon("接口只返回了 " + sn.Accounts.Count + " 个号，但 total=" + sn.Total + "，余额可能少算", CYellow, 9);
             }
 
             _history.Add(new KeyValuePair<DateTime, long>(now, sn.CreditsSum));
