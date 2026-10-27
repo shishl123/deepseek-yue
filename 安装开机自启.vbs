@@ -1,5 +1,5 @@
 Option Explicit
-' 把桌宠加入开机自启（写入当前用户启动文件夹）
+' Add DeepSeekPet to the current user's Startup folder (ASCII-only on purpose).
 Dim sh, fso, dir, startup, lnk
 Set sh = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -9,6 +9,6 @@ Set lnk = sh.CreateShortcut(startup & "\DeepSeekPet.lnk")
 lnk.TargetPath = dir & "\DeepSeekPet.exe"
 lnk.WorkingDirectory = dir
 lnk.IconLocation = dir & "\assets\icon.ico"
-lnk.Description = "DeepSeek 池余额桌宠"
+lnk.Description = "DeepSeek Pet - pool balance monitor"
 lnk.Save
-MsgBox "已加入开机自启：" & vbCrLf & startup & "\DeepSeekPet.lnk", 64, "DeepSeek 桌宠"
+MsgBox "Added to startup:" & vbCrLf & startup & "\DeepSeekPet.lnk", 64, "DeepSeek Pet"
