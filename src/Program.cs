@@ -56,7 +56,11 @@ namespace DshPet
                 cfg.Save();
 
                 PetWindow w = new PetWindow(cfg);
-                foreach (string a in args) { if (a == "--demo" || a == "-demo") w.DemoMode = true; }
+                foreach (string a in args)
+                {
+                    if (a == "--demo" || a == "-demo") w.DemoMode = true;
+                    if (a == "--follow-dsh" || a == "-follow-dsh") w.FollowDsh = true;
+                }
                 w.FormClosed += delegate { Life("FormClosed"); };
                 Life("run window");
                 Application.Run(w);

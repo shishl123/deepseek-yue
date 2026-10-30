@@ -22,6 +22,7 @@ namespace DshPet
         public int Y = int.MinValue;
         public int TimeoutSeconds = 10;
         public string Theme = "soft";
+        public string DshProcess = "DeepSeekRuntime";
 
         public string BaseDir;
         public string FilePath;
@@ -53,6 +54,7 @@ namespace DshPet
                         c.Y = (int)Json.Long(d, "y", c.Y);
                         c.TimeoutSeconds = (int)Json.Long(d, "timeoutSeconds", c.TimeoutSeconds);
                         c.Theme = Json.Str(d, "theme", c.Theme);
+                        c.DshProcess = Json.Str(d, "dshProcess", c.DshProcess);
                     }
                 }
             }
@@ -87,7 +89,8 @@ namespace DshPet
                 sb.Append("  \"x\": ").Append(X).Append(",\r\n");
                 sb.Append("  \"y\": ").Append(Y).Append(",\r\n");
                 sb.Append("  \"timeoutSeconds\": ").Append(TimeoutSeconds).Append(",\r\n");
-                sb.Append("  \"theme\": \"").Append(Json.Esc(Theme)).Append("\"\r\n");
+                sb.Append("  \"theme\": \"").Append(Json.Esc(Theme)).Append("\",\r\n");
+                sb.Append("  \"dshProcess\": \"").Append(Json.Esc(DshProcess)).Append("\"\r\n");
                 sb.Append("}\r\n");
                 File.WriteAllText(FilePath, sb.ToString(), new UTF8Encoding(false));
             }
