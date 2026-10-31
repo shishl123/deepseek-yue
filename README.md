@@ -42,7 +42,8 @@
 1. 下载本仓库（或 Releases 里的 zip）解压到任意目录
 2. 复制 `config.example.json` 为 `config.json`，填入自己的 `apiUrl` 和 `token`
 3. 双击 `启动桌宠.vbs`
-   - 想让它跟着 DeepSeekRuntime 一起开关：改双击 `启动DSH和桌宠.vbs` —— 先拉起桌宠，再启动 DSH，**DSH 一退出就自动关掉桌宠**。把平时用的 DSH 快捷方式指向这个 `.vbs` 即可。
+   - 想让它跟着 DeepSeekRuntime 一起开关：双击 `桌宠守护.vbs`（常驻约 3 MB，已内置开机自启）。它每 2 秒对一次状态：**DSH 在 → 拉起桌宠；DSH 关 → 关掉桌宠；DSH 再开 → 桌宠再回来**。
+   - 不想常驻就用 `启动DSH和桌宠.vbs`：先确保 DSH 在跑（没跑就拉起来），再拉起桌宠，等 DSH 退出后关掉桌宠。
 
 > 也可以用 `调试启动.bat` 看控制台输出；`调试启动.bat --demo` 会在启动 4 秒后模拟一次 `-1234` 消耗，方便看提示效果。
 >
