@@ -130,9 +130,6 @@ namespace DshPet
         // ---------- 依赖 ----------
         readonly Config _cfg;
         public bool DemoMode;
-        public bool FollowDsh;
-        DateTime _dshCheckAt = DateTime.MinValue;
-        bool _dshShown = true;
         bool _demoDone;
         readonly StatusClient _client;
 
@@ -148,7 +145,6 @@ namespace DshPet
 
         LayeredSurface _surface;
         System.Windows.Forms.Timer _anim;
-        System.Windows.Forms.Timer _dshTimer;
 
         // ---------- 布局 ----------
         double _dpi = 1.0;
@@ -313,69 +309,8 @@ namespace DshPet
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
-            if (FollowDsh)
-            {
-                _dshTimer = new System.Windows.Forms.Timer();
-                _dshTimer.Interval = 1500;
-                _dshTimer.Tick += delegate { CheckDsh(); };
-                _dshTimer.Start();
-                _dshShown = DshAlive();
-                Dbg.W("follow init: alive=" + _dshShown.ToString() + " proc=" + _cfg.DshProcess);
-                if (!_dshShown)
-                {
-                    _anim.Stop();
-                    Hide();
-                }
-            }
             StartPoll();
         }
-
-        bool DshAlive()
-        {
-            try
-            {
-                string token = _cfg.DshProcess;
-                if (string.IsNullOrEmpty(token)) return true;
-                bool found = false;
-                Native.EnumWindows(delegate(IntPtr h, IntPtr l)
-                {
-                    int len = Native.GetWindowTextLength(h);
-                    if (len < token.Length) return true;
-                    System.Text.StringBuilder sb = new System.Text.StringBuilder(len + 2);
-                    Native.GetWindowText(h, sb, sb.Capacity);
-                    string title = sb.ToString();
-                    if (title.Length > 0 && title.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        found = true;
-                        return false;
-                    }
-                    return true;
-                }, IntPtr.Zero);
-                return found;
-            }
-            catch { return true; }
-        }
-        void CheckDsh()
-        {
-            if (!FollowDsh) return;
-            bool alive = DshAlive();
-            Dbg.W("dsh check: alive=" + alive.ToString() + " shown=" + _dshShown.ToString() + " visible=" + Visible.ToString());
-            if (alive == _dshShown) return;
-            _dshShown = alive;
-            if (alive)
-            {
-                Show();
-                _anim.Start();
-                Render();
-                ShowBalloon("哥哥回来啦，我继续盯着余额~", CGreen, 3);
-            }
-            else
-            {
-                _anim.Stop();
-                Hide();
-            }
-        }
-
         protected override void OnFormClosed(FormClosedEventArgs e)
         {
             _closing = true;
@@ -570,24 +505,7 @@ namespace DshPet
             };
             _menu.Items.Add(miSkin);
 
-            ToolStripMenuItem miFollow = new ToolStripMenuItem("跟随 DSH 显示/隐藏");
-            miFollow.Checked = FollowDsh;
-            miFollow.CheckOnClick = true;
-            miFollow.Click += delegate
-            {
-                FollowDsh = miFollow.Checked;
-                if (FollowDsh && _dshTimer == null)
-                {
-                    _dshTimer = new System.Windows.Forms.Timer();
-                    _dshTimer.Interval = 1500;
-                    _dshTimer.Tick += delegate { CheckDsh(); };
-                    _dshTimer.Start();
-                }
-                _dshShown = DshAlive();
-                if (!_dshShown) { _anim.Stop(); Hide(); }
-                else { Show(); _anim.Start(); Render(); }
-            };
-            _menu.Items.Add(miFollow);
+
 
             _menu.Items.Add(new ToolStripSeparator());
 
@@ -1797,7 +1715,6 @@ namespace DshPet
             if (disposing)
             {
                 try { if (_anim != null) { _anim.Stop(); _anim.Dispose(); } } catch { }
-                try { if (_dshTimer != null) { _dshTimer.Stop(); _dshTimer.Dispose(); } } catch { }
                 try { if (_tray != null) { _tray.Visible = false; _tray.Dispose(); } } catch { }
                 try { if (_menu != null) _menu.Dispose(); } catch { }
                 try { if (_surface != null) _surface.Dispose(); } catch { }
