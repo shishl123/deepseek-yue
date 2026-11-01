@@ -184,6 +184,8 @@ namespace DshPet
         Snapshot _snap;
         long _prevCredits = -1;
         long _runConsumed;
+        long _dayConsumed;
+        DateTime _dayKey = DateTime.MinValue;
         long _lastDelta;
         DateTime _lastUpdate = DateTime.MinValue;
         readonly List<KeyValuePair<DateTime, long>> _history = new List<KeyValuePair<DateTime, long>>();
@@ -310,6 +312,7 @@ namespace DshPet
         protected override void OnShown(EventArgs e)
         {
             base.OnShown(e);
+            LoadDayConsumed();
             StartPoll();
         }
         protected override void OnFormClosed(FormClosedEventArgs e)
@@ -692,6 +695,7 @@ namespace DshPet
             _frame++;
 
             HandleDrag(now);
+            RollDayIfNeeded();
             StepNumbers();
             UpdateTilt(dt);
             UpdateHover(dt);
@@ -1042,6 +1046,7 @@ namespace DshPet
             {
                 long delta = prev - sn.CreditsSum;
                 _runConsumed += delta;
+                _dayConsumed += delta;
                 RaiseConsume(delta, now);
                 Log(now, sn, delta, "consume");
             }
@@ -1099,6 +1104,35 @@ namespace DshPet
             }
         }
 
+        void LoadDayConsumed()
+        {
+            _dayKey = DateTime.Today;
+            _dayConsumed = 0;
+            try
+            {
+                string file = Path.Combine(_cfg.BaseDir, "logs", "balance-" + DateTime.Now.ToString("yyyyMMdd") + ".csv");
+                if (!File.Exists(file)) return;
+                string[] lines = File.ReadAllLines(file);
+                foreach (string line in lines)
+                {
+                    if (string.IsNullOrEmpty(line) || line.StartsWith("time")) continue;
+                    string[] parts = line.Split(',');
+                    if (parts.Length < 9) continue;
+                    long d;
+                    if (long.TryParse(parts[7], out d) && d > 0) _dayConsumed += d;
+                }
+            }
+            catch { }
+        }
+
+        void RollDayIfNeeded()
+        {
+            DateTime today = DateTime.Today;
+            if (today == _dayKey) return;
+            _dayKey = today;
+            _dayConsumed = 0;
+            Dbg.W("day rolled, today consumed reset");
+        }
         void RaiseConsume(long delta, DateTime now)
         {
             _lastDelta = delta;
@@ -1146,8 +1180,8 @@ namespace DshPet
             else _r1 = "稳定";
 
             string delta = _lastDelta > 0 ? ("-" + Num(_lastDelta)) : "0";
-            string total = _runConsumed > 0 ? ("-" + Num(_runConsumed)) : "0";
-            _l2 = "本轮 " + delta + " · 累计 " + total;
+            string total = _dayConsumed > 0 ? ("-" + Num(_dayConsumed)) : "0";
+            _l2 = "本轮 " + delta + " · 今日 " + total;
 
             if (_snap.ExpiringRemain > 0)
                 _l3 = _cfg.ExpiryWarnDays.ToString() + "天到期 " + Num(_snap.ExpiringRemain);
