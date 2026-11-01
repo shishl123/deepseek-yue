@@ -193,6 +193,7 @@ namespace DshPet
 
         // ---------- HUD 文本 ----------
         string _v1 = "--", _r1 = "连接中", _l2 = "等待首次同步…", _r2 = "", _l3 = "", _r3 = "";
+        string _alt = "";
         double _bar;
         bool _low;
 
@@ -1131,11 +1132,17 @@ namespace DshPet
         void UpdateHudText()
         {
             if (_snap == null) return;
-            _v1 = Num(_snap.CreditsSum);
-            _target = _snap.CreditsSum;
+
+            bool useAll = string.Equals(_cfg.CountMode, "all", StringComparison.OrdinalIgnoreCase);
+            long main = useAll ? _snap.CreditsSum : _snap.CreditsAvailable;
+            long alt = useAll ? _snap.CreditsAvailable : _snap.CreditsSum;
+
+            _v1 = Num(main);
+            _target = main;
+            _alt = (useAll ? "可用 " : "总 ") + Num(alt);
 
             double rate = RatePerMinute();
-            if (rate > 0.05) _r1 = "可撑 " + FmtDuration(_snap.CreditsSum / rate);
+            if (rate > 0.05) _r1 = "可撑 " + FmtDuration(main / rate);
             else _r1 = "稳定";
 
             string delta = _lastDelta > 0 ? ("-" + Num(_lastDelta)) : "0";
@@ -1149,7 +1156,7 @@ namespace DshPet
 
             _r3 = "健康 " + _snap.Healthy.ToString() + "/" + _snap.Total.ToString();
             _bar = _snap.Total > 0 ? (double)_snap.Healthy / _snap.Total : 0;
-            _low = _snap.CreditsSum <= _cfg.LowBalanceWarn;
+            _low = main <= _cfg.LowBalanceWarn;
         }
 
         string ElapsedText()
@@ -1469,7 +1476,7 @@ namespace DshPet
             double fl = (DateTime.Now - _flashAt).TotalMilliseconds;
             bool flashing = fl >= 0 && fl < 760;
             return _cfg.Theme + "|" + _w + "x" + _h + "|" + _shown.ToString("0") + "|" + _v1
-                 + "|" + _l2 + "|" + _l3 + "|" + _r1 + "|" + _r3 + "|" + _low.ToString()
+                 + "|" + _l2 + "|" + _l3 + "|" + _r1 + "|" + _r3 + "|" + _low.ToString() + "|" + _alt
                  + "|" + ElapsedText() + "|" + (flashing ? ((int)fl).ToString() : "-")
                  + "|" + (_snap == null ? "n" : (_snap.Ok ? "o" : "e"));
         }
@@ -1569,6 +1576,8 @@ namespace DshPet
 
                 string numText = _shown >= 0 ? Num((long)Math.Round(_shown)) : _v1;
                 DrawLabel(g, numText, _fValue, bValue, xl + wl + (int)Math.Round(4 * d), y1, s);
+                if (_alt.Length > 0)
+                    DrawLabel(g, _alt, _fSmall, bDim, xr, y1 + (int)Math.Round(14 * d), s, SFRight);
 
                 float y2 = rc.Top + (int)Math.Round(34 * d);
                 DrawLabel(g, _l2, _fLine, _lastDelta > 0 ? bBad : bDim, x0, y2, s);

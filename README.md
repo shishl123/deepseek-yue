@@ -167,3 +167,17 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 
 - 桌宠形象、动作帧来自 [mdd111/deepseek-dafeiyu-pet](https://github.com/mdd111/deepseek-dafeiyu-pet) 的 `sprites/` 目录，按原仓库许可使用
 - 代码：MIT，见 [LICENSE](LICENSE)
+
+### 余额口径
+
+`accounts[]` 里每个号都有 `credits`，但状态可能不正常：
+
+| 状态 | 是否计入主数字（`countMode=available`） |
+| --- | --- |
+| 正常（`cooling=false, disabled=false`） | ✅ 计入 |
+| 冷却中 `cooling=true` | ❌ 排除 |
+| 已禁用 `disabled=true` | ❌ 排除 |
+| `credits = 0` 但状态正常 | ✅ 计入（就是 0） |
+
+右上角「总 X」永远是**全部账号**的合计，两个数字一起看就知道被禁用/冷却的号占了多少。
+**消耗与到账判定始终按「总」计算**，这样账号状态来回切换时不会误报成消耗或到账。

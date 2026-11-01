@@ -33,6 +33,8 @@ namespace DshPet
 
         public long CreditsSum;
         public long CreditsTotalSum;
+        public long CreditsAvailable;
+        public int AccountsAvailable;
         public long CreditFloor;
         public long ExpiringRemain;
         public int ExpiringCount;
@@ -74,7 +76,8 @@ namespace DshPet
             snap.Disabled = (int)Json.Long(root, "disabled", 0);
             snap.CreditFloor = Json.Long(root, "credit_floor", 0);
 
-            long sum = 0, totalSum = 0, tokens = 0;
+            long sum = 0, totalSum = 0, tokens = 0, avail = 0;
+            int availCount = 0;
             long expiring = 0;
             int expiringCount = 0;
             string earliest = "";
@@ -107,6 +110,11 @@ namespace DshPet
                     }
                     sum += a.Credits;
                     totalSum += a.CreditsTotal;
+                    if (!a.Cooling && !a.Disabled)
+                    {
+                        avail += a.Credits;
+                        availCount++;
+                    }
                     tokens += a.Tokens;
 
                     DateTime ap = ParseTime(a.EarliestExpiry);
@@ -141,6 +149,8 @@ namespace DshPet
 
             snap.CreditsSum = sum;
             snap.CreditsTotalSum = totalSum;
+            snap.CreditsAvailable = avail;
+            snap.AccountsAvailable = availCount;
             snap.TokensSum = tokens;
             snap.ExpiringRemain = expiring;
             snap.ExpiringCount = expiringCount;
