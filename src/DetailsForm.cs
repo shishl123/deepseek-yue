@@ -15,7 +15,7 @@ namespace DshPet
             _snap = snap;
             Text = "DeepSeek 池 · 账号余额明细";
             StartPosition = FormStartPosition.CenterScreen;
-            Size = new Size(980, 600);
+            Size = new Size(1180, 620);
             MinimumSize = new Size(720, 420);
             Font = new Font(fontName, 9f);
             ShowInTaskbar = true;
@@ -62,15 +62,17 @@ namespace DshPet
             grid.AlternatingRowsDefaultCellStyle.BackColor = Color.FromArgb(248, 250, 255);
 
             grid.Columns.Add(Col("nickname", "昵称", 90));
-            grid.Columns.Add(Col("uid", "uid", 150));
+            grid.Columns.Add(Col("uid", "uid", 110));
             grid.Columns.Add(Col("credits", "当前积分", 90));
             grid.Columns.Add(Col("creditsTotal", "累计积分", 90));
             grid.Columns.Add(Col("realm", "区域", 55));
             grid.Columns.Add(Col("earliest", "最早到期", 140));
             grid.Columns.Add(Col("remain", "该批剩余", 80));
             grid.Columns.Add(Col("state", "状态", 70));
-            grid.Columns.Add(Col("tokens", "累计 token", 90));
-            grid.Columns.Add(Col("requests", "请求数", 70));
+            grid.Columns.Add(Col("tokens", "累计 token", 70));
+            grid.Columns.Add(Col("requests", "请求数", 55));
+            grid.Columns.Add(Col("disabledAt", "禁用时间", 120));
+            grid.Columns.Add(Col("reason", "禁用/异常原因", 380));
 
             grid.Rows.Clear();
             foreach (AccountInfo a in snap.Accounts)
@@ -84,10 +86,25 @@ namespace DshPet
                         expiry = dt.ToString("yyyy-MM-dd HH:mm");
                 }
                 catch { }
+                string disabledAt = "";
+                try
+                {
+                    DateTime dt2;
+                    if (DateTime.TryParse(a.DisabledAt, CultureInfo.InvariantCulture, DateTimeStyles.None, out dt2) && dt2.Year > 2000)
+                        disabledAt = dt2.ToString("MM-dd HH:mm");
+                }
+                catch { }
+
                 int idx = grid.Rows.Add(
                     a.Nickname, a.Uid, N(a.Credits), N(a.CreditsTotal), "cn", expiry, N(a.EarliestRemaining),
-                    state, N(a.Tokens), N(a.Requests));
-                if (a.Credits <= 0)
+                    state, N(a.Tokens), N(a.Requests), disabledAt, ShortReason(a.DisabledReason));
+
+                if (a.DisabledReason.Length > 0)
+                {
+                    grid.Rows[idx].Cells["reason"].ToolTipText = a.DisabledReason;
+                    grid.Rows[idx].DefaultCellStyle.ForeColor = Color.FromArgb(150, 60, 60);
+                }
+                else if (a.Credits <= 0)
                     grid.Rows[idx].DefaultCellStyle.ForeColor = Color.FromArgb(190, 60, 60);
                 else if (state != "正常")
                     grid.Rows[idx].DefaultCellStyle.ForeColor = Color.FromArgb(170, 130, 20);
@@ -95,6 +112,19 @@ namespace DshPet
             root.Controls.Add(grid, 0, 1);
         }
 
+        static string ShortReason(string r)
+        {
+            if (string.IsNullOrEmpty(r)) return "";
+            string low = r.ToLowerInvariant();
+            if (low.Contains("11140") && low.Contains("restricted"))
+                return "上游限制(11140) 需申诉解封";
+            if (low.Contains("restricted by upstream")) return "上游限制";
+            if (low.Contains("unauthorized") || low.Contains("401")) return "鉴权失败(401)";
+            if (low.Contains("rate limit") || low.Contains("429")) return "限流(429)";
+            if (low.Contains("timeout") || low.Contains("timed out")) return "请求超时";
+            if (low.Contains("session") && low.Contains("expire")) return "会话过期";
+            return r.Length > 32 ? r.Substring(0, 32) + "…" : r;
+        }
         static DataGridViewTextBoxColumn Col(string name, string header, int width)
         {
             DataGridViewTextBoxColumn c = new DataGridViewTextBoxColumn();

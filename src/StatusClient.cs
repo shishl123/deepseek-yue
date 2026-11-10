@@ -17,6 +17,8 @@ namespace DshPet
         public long EarliestRemaining;
         public bool Cooling;
         public bool Disabled;
+        public string DisabledReason = "";
+        public string DisabledAt = "";
         public long Tokens;
         public long Requests;
     }
@@ -102,6 +104,9 @@ namespace DshPet
                     a.EarliestRemaining = Json.Long(d, "credits_earliest_remaining", 0);
                     a.Cooling = Json.Bool(d, "cooling", false);
                     a.Disabled = Json.Bool(d, "disabled", false);
+                    a.DisabledReason = Json.Str(d, "disabled_reason", "");
+                    if (a.DisabledReason.Length == 0) a.DisabledReason = Json.Str(d, "reason", "");
+                    a.DisabledAt = Json.Str(d, "disabled_at", "");
                     Dictionary<string, object> tu = Json.Obj(Json.Get(d, "token_usage"));
                     if (tu != null)
                     {
